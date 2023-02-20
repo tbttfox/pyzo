@@ -13,7 +13,6 @@ from ..qt import QtGui, QtCore
 
 Qt = QtCore.Qt
 
-import pyzo
 from ..misc import ustr, ce_option
 from ..parsers.tokens import (
     CommentToken,
@@ -484,6 +483,40 @@ class AutoCloseQuotesAndBrackets(object):
 
     """
 
+    def autoCloseQuotes(self):
+        """autoCloseQuotes()
+
+        Get whether auto indentation is enabled.
+
+        """
+        return self.__autoCloseQuotes
+
+    @ce_option(True)
+    def setAutoCloseQuotes(self, value):
+        """setAutoCloseQuotes(value)
+
+        Set whether to enable auto indentation.
+
+        """
+        self.__autoCloseQuotes = bool(value)
+
+    def autoCloseBrackets(self):
+        """autoCloseBrackets()
+
+        Get whether auto indentation is enabled.
+
+        """
+        return self.__autoCloseBrackets
+
+    @ce_option(True)
+    def setAutoCloseBrackets(self, value):
+        """setAutoCloseBrackets(value)
+
+        Set whether to enable auto indentation.
+
+        """
+        self.__autoCloseBrackets = bool(value)
+
     def _get_token_at_cursor(self, cursor=None, relpos=0):
         """Get token at the (current or given) cursor position. Can be None."""
         if cursor is None:
@@ -518,7 +551,7 @@ class AutoCloseQuotesAndBrackets(object):
         char = event.text()
 
         #  brackets
-        if char in brackets and pyzo.config.settings.autoClose_Brackets:
+        if char in brackets and self.autoCloseBrackets():
             # Dont autobracket inside comments and strings
             if isinstance(
                 self._get_token_at_cursor(cursor),
@@ -569,7 +602,7 @@ class AutoCloseQuotesAndBrackets(object):
                     cursor.insertText(char)  # == super().keyPressEvent(event)
 
         # quotes
-        elif char in quotes and pyzo.config.settings.autoClose_Quotes:
+        elif char in quotes and self.autoCloseQuotes():
             next_char = self.__getNextCharacter()
 
             # Dont autoquote inside comments and multiline strings
@@ -622,7 +655,7 @@ class AutoCloseQuotesAndBrackets(object):
 
         # remove whole couple of brackets when hitting backspace
         elif (
-            event.key() == Qt.Key_Backspace and pyzo.config.settings.autoClose_Brackets
+            event.key() == Qt.Key_Backspace and self.autoCloseBrackets()
         ):
             if isinstance(
                 self._get_token_at_cursor(cursor),

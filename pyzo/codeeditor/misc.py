@@ -85,7 +85,8 @@ class _CallbackEventHandler(QtCore.QObject):
 
     def postEventWithCallback(self, callback, *args):
         self.queue.put((callback, args))
-        QtWidgets.qApp.postEvent(self, QtCore.QEvent(QtCore.QEvent.User))
+        qApp = QtWidgets.QApplication.instance()
+        qApp.postEvent(self, QtCore.QEvent(QtCore.QEvent.User))
 
 
 def callLater(callback, *args):
