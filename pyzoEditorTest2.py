@@ -1,5 +1,6 @@
 import sys
-_path = r'D:\Users\Tyler\Documents\src\pyzo'
+_path = r'C:\Users\tyler\src\GitHub\InProgress\pyzo'
+
 if _path not in sys.path:
     sys.path.insert(0, _path)
 
@@ -18,11 +19,18 @@ from pyzo.core.codeparser import Parser
 PARSER = Parser()
 PARSER.start()
 
-
 # For accessing the config stuff.
+def wrap(value):
+    if isinstance(value, dict):
+        return DotProxy(value)
+    return value
+
 class DotProxy(object):
     def __init__(self, obj):
         self.obj = obj
+
+    def __contains__(self, key):
+        return key in obj.keys()
 
     def __getitem__(self, key):
         return wrap(self.obj[key])
@@ -34,16 +42,9 @@ class DotProxy(object):
             try:
                 return self[key]
             except KeyError:
-                raise AttributeError(key)
-
-
-def wrap(value):
-    if isinstance(value, dict):
-        return DotProxy(value)
-    return value
-
-
-CONFIG = DotProxy(json.load(open(r"D:\Users\Tyler\Documents\src\pyzo\defaultConfig.json", "r")))
+                # For now, dot-accessible dicts default to None if the key isn't found
+                # In the future I may want to `raise AttributeError(key)`
+                return None
 
 
 def normalizePath(path):
@@ -182,7 +183,6 @@ def determineLineEnding(text):
     return mode
 
 
-
 ICONS = DotProxy({})
 def loadIcons():
     """loadIcons()
@@ -205,7 +205,6 @@ def loadIcons():
             ICONS[name] = icon
 
 
-
 class KeyMapper(QtCore.QObject):
     """
     This class is accessable via keyMapper
@@ -214,15 +213,19 @@ class KeyMapper(QtCore.QObject):
 
     keyMappingChanged = QtCore.Signal()
 
+    def __init__(self, config):
+        super(KeyMapper, self).__init__()
+        self._config = config
+
     def setShortcut(self, action):
         """
         When an action is created or when keymappings are changed, this method
         is called to set the shortcut of an action based on its menuPath
-        (which is the key in CONFIG.shortcuts2, e.g. shell__clear_screen)
+        (which is the key in self._config.shortcuts2, e.g. shell__clear_screen)
         """
-        if action.menuPath in CONFIG.shortcuts2:
+        if action.menuPath in self._config.shortcuts2.keys():
             # Set shortcut so Qt can do its magic
-            shortcuts = CONFIG.shortcuts2[action.menuPath]
+            shortcuts = self._config.shortcuts2[action.menuPath]
             action.setShortcuts(shortcuts.split(","))
             MAIN.addAction(
                 action
@@ -230,9 +233,6 @@ class KeyMapper(QtCore.QObject):
             # Also store shortcut text (used in display of tooltip
             shortcuts = shortcuts.replace(",", ", ").replace("  ", " ")
             action._shortcutsText = shortcuts.rstrip(", ")
-
-
-KEYMAPPER = KeyMapper()
 
 
 class CallTipObject:
@@ -382,9 +382,10 @@ class Menu(QtWidgets.QMenu):
     arguments usually fit nicely on the second line.
 
     """
-
     def __init__(self, parent=None, name=None):
-        QtWidgets.QMenu.__init__(self, parent)
+        super(Menu, self).__init__(parent)
+
+        self._keymapper = self.parent()._keymapper
 
         # Make sure that the menu has a title
         if name:
@@ -459,8 +460,8 @@ class Menu(QtWidgets.QMenu):
         a.menuPath = self.menuPath + "__" + self._createMenuPathName(key)
 
         # Register the action so its keymap is kept up to date
-        KEYMAPPER.keyMappingChanged.connect(lambda: KEYMAPPER.setShortcut(a))
-        KEYMAPPER.setShortcut(a)
+        self._keymapper.keyMappingChanged.connect(lambda: self._keymapper.setShortcut(a))
+        self._keymapper.setShortcut(a)
 
         return a
 
@@ -583,7 +584,7 @@ class EditorContextMenu(Menu):
 
     def __init__(self, editor, name="EditorContextMenu"):
         self._editor = editor
-        Menu.__init__(self, editor, name)
+        super(EditorContextMenu, self).__init__(editor, name)
 
     def build(self):
         """Build menu"""
@@ -744,33 +745,20 @@ class EditorContextMenu(Menu):
 
 
 class BaseTextCtrl(CodeEditor):
-    """The base text control class.
+    """The base text control class
     Inherited by the shell class and the Pyzo editor.
     The class implements autocompletion, calltips, and auto-help
-
-    Inherits from QsciScintilla. I tried to clean up the rather dirty api
-    by using more sensible names. Hereby I apply the following rules:
-    - if you set something, the method starts with "set"
-    - if you get something, the method starts with "get"
-    - a position is the integer position fron the start of the document
-    - a linenr is the number of a line, an index the position on that line
-    - all the above indices apply to the bytes (encoded utf-8) in which the
-      text is stored. If you have unicode text, they do not apply!
-    - the method name mentions explicityly what you get. getBytes() returns the
-      bytes of the document, getString() gets the unicode string that it
-      represents. This applies to the get-methods. the set-methods use the
-      term text, and automatically convert to bytes using UTF-8 encoding
-      when a string is given.
     """
 
-    def __init__(self, *args, **kwds):
+    def __init__(self, config, *args, **kwds):
         super().__init__(*args, **kwds)
+        self._config = config
 
         # Set font and zooming
-        self.setFont(CONFIG.view.fontname)
-        self.setZoom(CONFIG.view.zoom)
-        self.setShowWhitespace(CONFIG.view.showWhitespace)
-        self.setHighlightMatchingBracket(CONFIG.view.highlightMatchingBracket)
+        self.setFont(self._config.view.fontname)
+        self.setZoom(self._config.view.zoom)
+        self.setShowWhitespace(self._config.view.showWhitespace)
+        self.setHighlightMatchingBracket(self._config.view.highlightMatchingBracket)
 
         # Create timer for autocompletion delay
         self._delayTimer = QtCore.QTimer(self)
@@ -786,14 +774,14 @@ class BaseTextCtrl(CodeEditor):
         self._autoCompBuffer_result = []
 
         self.setAutoCompletionAcceptKeysFromStr(
-            CONFIG.settings.autoComplete_acceptKeys
+            self._config.settings.autoComplete_acceptKeys
         )
 
         self.completer().highlighted.connect(self.updateHelp)
-        self.setIndentUsingSpaces(CONFIG.settings.defaultIndentUsingSpaces)
-        self.setIndentWidth(CONFIG.settings.defaultIndentWidth)
-        self.setAutocompletPopupSize(*CONFIG.view.autoComplete_popupSize)
-        self.setAutocompleteMinChars(CONFIG.settings.autoComplete_minChars)
+        self.setIndentUsingSpaces(self._config.settings.defaultIndentUsingSpaces)
+        self.setIndentWidth(self._config.settings.defaultIndentWidth)
+        self.setAutocompletPopupSize(*self._config.view.autoComplete_popupSize)
+        self.setAutocompleteMinChars(self._config.settings.autoComplete_minChars)
         self.setCancelCallback(self.restoreHelp)
 
     def setAutoCompletionAcceptKeysFromStr(self, keys):
@@ -840,12 +828,9 @@ class BaseTextCtrl(CodeEditor):
 
         return (
             text,
-            list(
-                filter(
-                    lambda token: token.isToken,  # filter to remove BlockStates
-                    self.parser().parseLine(text, previousState),
-                )
-            ),
+            [
+                t for t in self.parser().parseLine(text, previousState) if t.isToken
+            ],  # filter to remove BlockStates
         )
 
     def introspect(self, tryAutoComp=False, delay=True):
@@ -861,7 +846,7 @@ class BaseTextCtrl(CodeEditor):
         user types a lot of characters, there is not a stream of useless
         introspection attempts; the introspection is only really started
         after he stops typing for, say 0.1 or 0.5 seconds (depending on
-        CONFIG.autoCompDelay).
+        self._config.autoCompDelay).
 
         The method _introspectNow() will parse the line to obtain
         information required to obtain the autocompletion and signature
@@ -889,7 +874,7 @@ class BaseTextCtrl(CodeEditor):
         self._delayTimer._cursor = cursor
         self._delayTimer._tryAutoComp = tryAutoComp
         if delay:
-            self._delayTimer.start(CONFIG.advanced.autoCompDelay)
+            self._delayTimer.start(self._config.advanced.autoCompDelay)
         else:
             self._delayTimer.start(1)  # self._introspectNow()
 
@@ -901,7 +886,7 @@ class BaseTextCtrl(CodeEditor):
 
         tokens = self._delayTimer._tokensUptoCursor
 
-        if CONFIG.settings.autoCallTip:
+        if self._config.settings.autoCallTip:
             # Parse the line, to get the name of the function we should calltip
             # if the name is empty/None, we should not show a signature
             name, needle, stats = parseLine_signature(tokens)
@@ -920,7 +905,7 @@ class BaseTextCtrl(CodeEditor):
             else:
                 self.calltipCancel()
 
-        if self._delayTimer._tryAutoComp and CONFIG.settings.autoComplete:
+        if self._delayTimer._tryAutoComp and self._config.settings.autoComplete:
             # Parse the line, to see what (partial) name we need to complete
             name, needle = parseLine_autocomplete(tokens)
 
@@ -1062,7 +1047,7 @@ class BaseTextCtrl(CodeEditor):
 
         # Invoke autocomplete via tab key?
         if event.key() == QtCore.Qt.Key_Tab and not self.autocompleteActive():
-            if CONFIG.settings.autoComplete:
+            if self._config.settings.autoComplete:
                 cursor = self.textCursor()
                 if cursor.position() == cursor.anchor():
                     text = cursor.block().text()[: cursor.positionInBlock()]
@@ -1076,7 +1061,7 @@ class BaseTextCtrl(CodeEditor):
         if ordKey:
             if (
                 ordKey >= 48 or ordKey in [8, 46]
-            ) and CONFIG.settings.autoComplete == 1:
+            ) and self._config.settings.autoComplete == 1:
                 # If a char that allows completion or backspace or dot was pressed
                 self.introspect(True)
             elif ordKey >= 32:
@@ -1089,27 +1074,29 @@ class BaseTextCtrl(CodeEditor):
 class PyzoEditor(BaseTextCtrl):
     somethingChanged = QtCore.Signal()
 
-    def __init__(self, parent, **kwds):
-        super().__init__(parent, showLineNumbers=True, **kwds)
+    def __init__(self, config, parent=None, **kwds):
+        super().__init__(config, parent=parent, showLineNumbers=True, **kwds)
 
         # Init filename and name
         self._filename = ""
         self._name = "<TMP>"
 
+        self._keymapper = KeyMapper(config)
+
         # View settings
         # TODO: self.setViewWrapSymbols(view.showWrapSymbols)
-        self.setShowLineEndings(CONFIG.view.showLineEndings)
-        self.setShowIndentationGuides(CONFIG.view.showIndentationGuides)
+        self.setShowLineEndings(self._config.view.showLineEndings)
+        self.setShowIndentationGuides(self._config.view.showIndentationGuides)
         #
-        self.setWrap(bool(CONFIG.view.wrap))
-        self.setHighlightCurrentLine(CONFIG.view.highlightCurrentLine)
-        self.setLongLineIndicatorPosition(CONFIG.view.edgeColumn)
+        self.setWrap(bool(self._config.view.wrap))
+        self.setHighlightCurrentLine(self._config.view.highlightCurrentLine)
+        self.setLongLineIndicatorPosition(self._config.view.edgeColumn)
         # TODO: self.setFolding( int(view.codeFolding)*5 )
         # bracematch is set in baseTextCtrl, since it also applies to shells
         # dito for zoom and tabWidth
 
         # Set line endings to default
-        self.lineEndings = CONFIG.settings.defaultLineEndings
+        self.lineEndings = self._config.settings.defaultLineEndings
 
         # Set encoding to default
         self.encoding = "UTF-8"
@@ -1126,7 +1113,7 @@ class PyzoEditor(BaseTextCtrl):
         self._showRunCursorTimer = QtCore.QTimer()
 
         # Add context menu (the offset is to prevent accidental auto-clicking)
-        #self._menu = EditorContextMenu(self)
+        self._menu = EditorContextMenu(self)
         self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(
             lambda p: self._menu.popup(self.mapToGlobal(p) + QtCore.QPoint(0, 3))
@@ -1191,7 +1178,7 @@ class PyzoEditor(BaseTextCtrl):
         """Overloaded version of justifyText to make it use our
         configurable justificationwidth.
         """
-        super().justifyText(CONFIG.settings.justificationWidth)
+        super().justifyText(self._config.settings.justificationWidth)
 
     def showRunCursor(self, cursor):
         """
@@ -1333,7 +1320,7 @@ class PyzoEditor(BaseTextCtrl):
         # Remove whitespace in a single undo-able action
         if (
             self.removeTrailingWS
-            or CONFIG.settings.removeTrailingWhitespaceWhenSaving
+            or self._config.settings.removeTrailingWhitespaceWhenSaving
         ):
             # Original cursor to put state back at the end
             oricursor = self.textCursor()
@@ -1645,9 +1632,10 @@ class PyzoEditor(BaseTextCtrl):
 
 if __name__ == "__main__":
     from Qt.QtWidgets import QApplication, QMainWindow
+    CONFIG = DotProxy(json.load(open(r"C:\Users\tyler\src\GitHub\InProgress\pyzo\defaultConfig.json", "r")))
     app = QApplication(sys.argv)
     MAIN = QMainWindow()
-    ed = PyzoEditor(MAIN)
+    ed = PyzoEditor(CONFIG, parent=MAIN)
     MAIN.setCentralWidget(ed)
     MAIN.show()
     sys.exit(app.exec_())
