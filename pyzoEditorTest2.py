@@ -1,5 +1,6 @@
 import sys
-_path = r'C:\Users\tyler\src\GitHub\InProgress\pyzo'
+
+_path = r"C:\Users\tyler\src\GitHub\InProgress\pyzo"
 
 if _path not in sys.path:
     sys.path.insert(0, _path)
@@ -16,15 +17,7 @@ from pyzo.util._locale import translate
 from pyzo.core.codeparser import Parser
 
 
-PARSER = Parser()
-PARSER.start()
-
 # For accessing the config stuff.
-def wrap(value):
-    if isinstance(value, dict):
-        return DotProxy(value)
-    return value
-
 class DotProxy(object):
     def __init__(self, obj):
         self.obj = obj
@@ -32,19 +25,28 @@ class DotProxy(object):
     def __contains__(self, key):
         return key in obj.keys()
 
+    def __setitem__(self, key, val):
+        self.obj[key] = val
+
     def __getitem__(self, key):
-        return wrap(self.obj[key])
+        return self.wrap(self.obj[key])
 
     def __getattr__(self, key):
         try:
-            return wrap(getattr(self.obj, key))
+            return self.wrap(getattr(self.obj, key))
         except AttributeError:
             try:
-                return self[key]
+                return self.wrap(self[key])
             except KeyError:
                 # For now, dot-accessible dicts default to None if the key isn't found
                 # In the future I may want to `raise AttributeError(key)`
                 return None
+
+    @classmethod
+    def wrap(cls, value):
+        if isinstance(value, dict):
+            return cls(value)
+        return value
 
 
 def normalizePath(path):
@@ -183,14 +185,13 @@ def determineLineEnding(text):
     return mode
 
 
-ICONS = DotProxy({})
 def loadIcons():
     """loadIcons()
     Load all icons in the icon dir.
     """
     # Get directory containing the icons
-    iconDir = r"D:\Users\Tyler\Documents\src\pyzo\pyzo\resources\icons"
-
+    iconDir = r"C:\Users\tyler\src\GitHub\InProgress\pyzo\pyzo\resources\icons"
+    ret = DotProxy({})
     # Construct other icons
     for fname in os.listdir(iconDir):
         if fname.endswith(".png"):
@@ -202,7 +203,8 @@ def loadIcons():
             icon = QtGui.QIcon()
             icon.addFile(ffname, QtCore.QSize(16, 16))
             # Store
-            ICONS[name] = icon
+            ret[name] = icon
+    return ret
 
 
 class KeyMapper(QtCore.QObject):
@@ -213,8 +215,8 @@ class KeyMapper(QtCore.QObject):
 
     keyMappingChanged = QtCore.Signal()
 
-    def __init__(self, config):
-        super(KeyMapper, self).__init__()
+    def __init__(self, config, parent):
+        super(KeyMapper, self).__init__(parent=parent)
         self._config = config
 
     def setShortcut(self, action):
@@ -227,9 +229,8 @@ class KeyMapper(QtCore.QObject):
             # Set shortcut so Qt can do its magic
             shortcuts = self._config.shortcuts2[action.menuPath]
             action.setShortcuts(shortcuts.split(","))
-            MAIN.addAction(
-                action
-            )  # issue #470, http://stackoverflow.com/questions/23916623
+            # issue #470, http://stackoverflow.com/questions/23916623
+            self.parent().addAction(action)
             # Also store shortcut text (used in display of tooltip
             shortcuts = shortcuts.replace(",", ", ").replace("  ", " ")
             action._shortcutsText = shortcuts.rstrip(", ")
@@ -382,10 +383,13 @@ class Menu(QtWidgets.QMenu):
     arguments usually fit nicely on the second line.
 
     """
+
     def __init__(self, parent=None, name=None):
         super(Menu, self).__init__(parent)
 
-        self._keymapper = self.parent()._keymapper
+        par = self.parent()
+        self._keymapper = par._keymapper
+        self._icons = par._icons
 
         # Make sure that the menu has a title
         if name:
@@ -460,7 +464,9 @@ class Menu(QtWidgets.QMenu):
         a.menuPath = self.menuPath + "__" + self._createMenuPathName(key)
 
         # Register the action so its keymap is kept up to date
-        self._keymapper.keyMappingChanged.connect(lambda: self._keymapper.setShortcut(a))
+        self._keymapper.keyMappingChanged.connect(
+            lambda: self._keymapper.setShortcut(a)
+        )
         self._keymapper.setShortcut(a)
 
         return a
@@ -582,8 +588,9 @@ class Menu(QtWidgets.QMenu):
 class EditorContextMenu(Menu):
     """This is the context menu for the editor"""
 
-    def __init__(self, editor, name="EditorContextMenu"):
+    def __init__(self, editor, window, name="EditorContextMenu"):
         self._editor = editor
+        self._window = window
         super(EditorContextMenu, self).__init__(editor, name)
 
     def build(self):
@@ -595,7 +602,7 @@ class EditorContextMenu(Menu):
                 "menu",
                 "Help on this expression ::: Show help for the selected expression.",
             ),
-            ICONS.help,
+            self._icons.help,
             self._editItemCallback,
             "helpOnText",
         )
@@ -605,50 +612,50 @@ class EditorContextMenu(Menu):
         # This is a subset of the edit menu. Copied manually.
         self.addItem(
             translate("menu", "Cut ::: Cut the selected text."),
-            ICONS.cut,
+            self._icons.cut,
             self._editItemCallback,
             "cut",
         )
         self.addItem(
             translate("menu", "Copy ::: Copy the selected text to the clipboard."),
-            ICONS.page_white_copy,
+            self._icons.page_white_copy,
             self._editItemCallback,
             "copy",
         )
         self.addItem(
             translate("menu", "Paste ::: Paste the text that is now on the clipboard."),
-            ICONS.paste_plain,
+            self._icons.paste_plain,
             self._editItemCallback,
             "paste",
         )
         self.addItem(
             translate("menu", "Select all ::: Select all text."),
-            ICONS.sum,
+            self._icons.sum,
             self._editItemCallback,
             "selectAll",
         )
         self.addSeparator()
         self.addItem(
             translate("menu", "Indent ::: Indent the selected line."),
-            ICONS.text_indent,
+            self._icons.text_indent,
             self._editItemCallback,
             "indentSelection",
         )
         self.addItem(
             translate("menu", "Dedent ::: Unindent the selected line."),
-            ICONS.text_indent_remove,
+            self._icons.text_indent_remove,
             self._editItemCallback,
             "dedentSelection",
         )
         self.addItem(
             translate("menu", "Comment ::: Comment the selected line."),
-            ICONS.comment_add,
+            self._icons.comment_add,
             self._editItemCallback,
             "commentCode",
         )
         self.addItem(
             translate("menu", "Uncomment ::: Uncomment the selected line."),
-            ICONS.comment_delete,
+            self._icons.comment_delete,
             self._editItemCallback,
             "uncommentCode",
         )
@@ -666,7 +673,7 @@ class EditorContextMenu(Menu):
                 "menu",
                 "Justify comment/docstring::: Reshape the selected text so it is aligned to around 70 characters.",
             ),
-            ICONS.text_align_justify,
+            self._icons.text_align_justify,
             self._editItemCallback,
             "justifyText",
         )
@@ -675,7 +682,7 @@ class EditorContextMenu(Menu):
             translate(
                 "menu", "Goto Definition ::: Go to definition of word under cursor."
             ),
-            ICONS.debug_return,
+            self._icons.debug_return,
             self._editItemCallback,
             "gotoDef",
         )
@@ -693,7 +700,7 @@ class EditorContextMenu(Menu):
                 "menu",
                 "Find or replace ::: Show find/replace widget. Initialize with selected text.",
             ),
-            ICONS.find,
+            self._icons.find,
             pyzo.editors._findReplace.startFind,
         )
         self.addItem(
@@ -721,7 +728,7 @@ class EditorContextMenu(Menu):
                 "menu",
                 "Run selection ::: Run the current editor's selected lines, selected words on the current line, or current line if there is no selection.",
             ),  # noqa
-            ICONS.run_lines,
+            self._icons.run_lines,
             self._runSelected,
         )
 
@@ -740,7 +747,7 @@ class EditorContextMenu(Menu):
             getattr(self._editor, action)()
 
     def _runSelected(self):
-        runMenu = MAIN.menuBar()._menumap["run"]
+        runMenu = self._window.menuBar()._menumap["run"]
         runMenu._runSelected()
 
 
@@ -1081,7 +1088,13 @@ class PyzoEditor(BaseTextCtrl):
         self._filename = ""
         self._name = "<TMP>"
 
-        self._keymapper = KeyMapper(config)
+        self._main = parent
+        self._keymapper = KeyMapper(config, self._main)
+        self._icons = loadIcons()
+
+        self._parser = Parser()
+        self._parser.start()
+
 
         # View settings
         # TODO: self.setViewWrapSymbols(view.showWrapSymbols)
@@ -1113,7 +1126,7 @@ class PyzoEditor(BaseTextCtrl):
         self._showRunCursorTimer = QtCore.QTimer()
 
         # Add context menu (the offset is to prevent accidental auto-clicking)
-        self._menu = EditorContextMenu(self)
+        self._menu = EditorContextMenu(self, self._main)
         self.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(
             lambda p: self._menu.popup(self.mapToGlobal(p) + QtCore.QPoint(0, 3))
@@ -1221,7 +1234,6 @@ class PyzoEditor(BaseTextCtrl):
         # test the modification time...
         mtime = os.path.getmtime(path)
         if mtime != self._modifyTime:
-
             # ask user
             dlg = QtWidgets.QMessageBox(self)
             dlg.setWindowTitle("File was changed")
@@ -1252,13 +1264,13 @@ class PyzoEditor(BaseTextCtrl):
         self.somethingChanged.emit()
 
     def _onModified(self):
-        PARSER.parseThis(self)
+        self._parser.parseThis(self)
 
     def _updateStatusBar(self):
         return
         """
         editor = pyzo.editors.getCurrentEditor()
-        sb = MAIN.statusBar()
+        sb = self.parent().statusBar()
         sb.updateCursorInfo(editor)
         sb.updateFileEncodingInfo(editor)
         """
@@ -1292,17 +1304,18 @@ class PyzoEditor(BaseTextCtrl):
             BaseTextCtrl.showEvent(self, event)
 
         # Make parser update
-        PARSER.parseThis(self)
+        self._parser.parseThis(self)
 
     def setTitleInMainWindow(self):
         """set the title  text in the main window to show filename."""
 
         # compose title
-        name, path = self._name, self._filename
-        if path:
-            MAIN.setMainTitle(path)
-        else:
-            MAIN.setMainTitle(name)
+        if self._main:
+            name, path = self._name, self._filename
+            if path:
+                self._main.setMainTitle(path)
+            else:
+                self._main.setMainTitle(name)
 
     def save(self, filename=None):
         """Save the file. No checking is done."""
@@ -1561,7 +1574,7 @@ class PyzoEditor(BaseTextCtrl):
             return
 
         # Try obtaining calltip from the source
-        sig = PARSER.getFictiveSignature(cto.name, self, True)
+        sig = self._parser.getFictiveSignature(cto.name, self, True)
         if sig:
             # Done
             cto.finish(sig)
@@ -1585,7 +1598,7 @@ class PyzoEditor(BaseTextCtrl):
         # nameForShell = aco.name
 
         # Get normal fictive namespace
-        fictiveNS = PARSER.getFictiveNameSpace(self)
+        fictiveNS = self._parser.getFictiveNameSpace(self)
         fictiveNS = set(fictiveNS)
 
         # Add names
@@ -1593,7 +1606,7 @@ class PyzoEditor(BaseTextCtrl):
             # "root" names
             aco.addNames(fictiveNS)
             # imports
-            importNames, importLines = PARSER.getFictiveImports(self)
+            importNames, importLines = self._parser.getFictiveImports(self)
             aco.addNames(importNames)
         else:
             # Prepare list of class names to check out
@@ -1606,7 +1619,7 @@ class PyzoEditor(BaseTextCtrl):
                     continue
                 if handleSelf or (className in fictiveNS):
                     # Only the self list (only first iter)
-                    fictiveClass = PARSER.getFictiveClass(
+                    fictiveClass = self._parser.getFictiveClass(
                         className, self, handleSelf
                     )
                     handleSelf = False
@@ -1630,12 +1643,21 @@ class PyzoEditor(BaseTextCtrl):
         aco.finish()
 
 
-if __name__ == "__main__":
+def _test():
     from Qt.QtWidgets import QApplication, QMainWindow
-    CONFIG = DotProxy(json.load(open(r"C:\Users\tyler\src\GitHub\InProgress\pyzo\defaultConfig.json", "r")))
+
+    CONFIG = DotProxy(
+        json.load(
+            open(r"C:\Users\tyler\src\GitHub\InProgress\pyzo\defaultConfig.json", "r")
+        )
+    )
     app = QApplication(sys.argv)
     MAIN = QMainWindow()
     ed = PyzoEditor(CONFIG, parent=MAIN)
     MAIN.setCentralWidget(ed)
     MAIN.show()
     sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    _test()
